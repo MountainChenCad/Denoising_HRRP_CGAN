@@ -9,3 +9,4 @@ ablation_cgan.py
 ablation_cgan.py
 analyze_ablation_results.py
 /checkpoints_simulated
+/ablation_analysis

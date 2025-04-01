@@ -34,9 +34,9 @@ plt.rcParams['figure.titlesize'] = 16
 # Define color scheme for visualizations
 COLORS = {
     'noisy': '#7F7F7F',  # Gray
-    'cgan': '#1F77B4',  # Blue
-    'cae': '#2CA02C',  # Green
-    'msae': '#D62728',  # Red
+    'cgan': '#40557E',  # Blue
+    'cae': '#C9717A',  # Green
+    'msae': '#B5B6B6',  # Red
     'clean': '#000000'  # Black
 }
 
