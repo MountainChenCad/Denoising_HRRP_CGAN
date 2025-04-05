@@ -4,7 +4,7 @@ This repository provides a comprehensive deep learning framework for High-Resolu
 > This paper addresses the issue of High Resolution Range Profile (HRRP) data-based Radar Automatic Target Recognition (RATR) under noise interference by proposing a denoising and reconstruction method based on a feature fusion Conditional Generative Adversarial Network (CGAN). Compared with current methods based on Auto-Encoder (AE) models that only achieves local precision, the proposed the CGAN effectively learn the global distribution of HRRP data through the adversarial training of a generator structured as an encoder-decoder and a discriminator composed by a Multilayer Perceptron (MLP). Additionally, to realize precise HRRP denoising and reconstruction, inspired by the application of radial length for rough target classification, we introduce two simple but innovative modules that designed to extract high-dimensional representations of geometry information and identity information, which is finally fused with high-dimensional representation of HRRP extracted by the encoder and serves as the decoder's input. In our experiments, we employs a One Dimensional Convolutional Neural Network (1-D CNN) to classify the denoised and reconstructed HRRPs and evaluate the effectiveness of the proposed method. \textcolor{blue}{Results prove that in the conditions of Peak Signal-to-Noise Ratio (PSNR) 20dB, 10dB and 5dB, the improvement of recognition accuracy, PSNR, and Structural Similarity (SSIM) surpass other methods on both simulated and measured datasets.
 
 <p align="center">
-  <img src="method.jpg" width="40%">
+  <img src="method.jpg" width="60%">
 </p>
 
 ---
