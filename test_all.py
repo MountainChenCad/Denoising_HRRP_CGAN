@@ -9,6 +9,8 @@ from tqdm import tqdm
 import time
 from pathlib import Path
 import copy
+import matplotlib.gridspec as gridspec
+from matplotlib.ticker import MaxNLocator
 
 from models.modules import TargetRadialLengthModule, TargetIdentityModule
 from models.cgan_models import Generator
@@ -21,15 +23,16 @@ from utils.cnn_evaluator import HRRPCNN, train_cnn, evaluate_cnn, evaluate_denoi
 
 # Set matplotlib parameters for better visualizations
 plt.rcParams['font.size'] = 10
+plt.rcParams['font.family'] = 'serif'
 plt.rcParams['axes.linewidth'] = 1.5
-plt.rcParams['axes.labelsize'] = 12
-plt.rcParams['axes.titlesize'] = 14
+plt.rcParams['axes.labelsize'] = 11
+plt.rcParams['axes.titlesize'] = 12
 plt.rcParams['xtick.major.width'] = 1.5
 plt.rcParams['ytick.major.width'] = 1.5
 plt.rcParams['xtick.labelsize'] = 10
 plt.rcParams['ytick.labelsize'] = 10
 plt.rcParams['legend.fontsize'] = 10
-plt.rcParams['figure.titlesize'] = 16
+plt.rcParams['figure.titlesize'] = 13
 
 # Define color scheme for visualizations
 COLORS = {
@@ -70,7 +73,6 @@ def load_or_train_cnn(args, device):
 
     # Load training dataset
     train_dataset = HRRPDataset(args.train_dir, dataset_type=args.dataset_type)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 
     # Prepare validation set (20% of training data)
     val_size = int(0.2 * len(train_dataset))
@@ -96,7 +98,7 @@ def load_or_train_cnn(args, device):
     return model
 
 
-def test_cgan(args, device, psnr_level, cnn_model=None):
+def test_cgan(args, device, psnr_level, cnn_model=None, collected_samples=None):
     """
     Test CGAN model for HRRP signal denoising at a specific PSNR level
 
@@ -105,6 +107,7 @@ def test_cgan(args, device, psnr_level, cnn_model=None):
         device: Device to test on (CPU or GPU)
         psnr_level: Target PSNR level in dB
         cnn_model: Pre-trained CNN for recognition accuracy evaluation (optional)
+        collected_samples: Dictionary to collect samples for grid visualization
 
     Returns:
         Dictionary of test metrics
@@ -238,33 +241,19 @@ def test_cgan(args, device, psnr_level, cnn_model=None):
                 'psnr_improvement': denoised_psnr - noisy_psnr
             })
 
-            # Plot and save results
-            plt.figure(figsize=(12, 4))
+            # Collect samples for grid visualization (first 5 samples)
+            if collected_samples is not None and i < 5:
+                if i not in collected_samples:
+                    collected_samples[i] = {
+                        'clean': clean_np,
+                        'noisy': noisy_data.cpu().numpy()[0],
+                        'noisy_psnr': noisy_psnr
+                    }
 
-            plt.subplot(1, 3, 1)
-            plt.plot(clean_data.cpu().numpy()[0], color=COLORS['clean'], linewidth=1.5)
-            plt.title('Clean HRRP')
-            plt.xlabel('Range Bin')
-            plt.ylabel('Magnitude')
-            plt.grid(True, linestyle='--', alpha=0.3)
-
-            plt.subplot(1, 3, 2)
-            plt.plot(noisy_data.cpu().numpy()[0], color=COLORS['noisy'], linewidth=1.5)
-            plt.title(f'Noisy HRRP (PSNR: {noisy_psnr:.2f}dB)')
-            plt.xlabel('Range Bin')
-            plt.ylabel('Magnitude')
-            plt.grid(True, linestyle='--', alpha=0.3)
-
-            plt.subplot(1, 3, 3)
-            plt.plot(denoised_data.cpu().numpy()[0], color=COLORS['cgan'], linewidth=1.5)
-            plt.title(f'CGAN Denoised (PSNR: {denoised_psnr:.2f}dB, SSIM: {denoised_ssim:.4f})')
-            plt.xlabel('Range Bin')
-            plt.ylabel('Magnitude')
-            plt.grid(True, linestyle='--', alpha=0.3)
-
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, f'sample_{i + 1}_denoising.svg'), dpi=300, bbox_inches='tight')
-            plt.close()
+                # Add CGAN results
+                collected_samples[i]['cgan'] = denoised_np
+                collected_samples[i]['cgan_psnr'] = denoised_psnr
+                collected_samples[i]['cgan_ssim'] = denoised_ssim
 
             # Update progress bar
             progress_bar.update(1)
@@ -333,52 +322,11 @@ def test_cgan(args, device, psnr_level, cnn_model=None):
     print(f"  Average Denoised PSNR: {avg_denoised_psnr:.2f}dB")
     print(f"  Average PSNR Improvement: {avg_psnr_improvement:.2f}dB")
     print(f"  Average Denoised SSIM: {avg_denoised_ssim:.4f}")
-    print(f"  Average Noisy MSE: {avg_noisy_mse:.6f}")
-    print(f"  Average Denoised MSE: {avg_denoised_mse:.6f}")
-
-    # Print CNN metrics if available
-    if cnn_metrics:
-        print(f"  CNN Clean Accuracy: {cnn_metrics['clean_accuracy']:.2f}%")
-        print(f"  CNN Noisy Accuracy: {cnn_metrics['noisy_accuracy']:.2f}%")
-        print(f"  CNN Denoised Accuracy: {cnn_metrics['denoised_accuracy']:.2f}%")
-        print(f"  CNN Accuracy Improvement: {cnn_metrics['accuracy_improvement']:.2f}%")
-
-    # Write summary to file
-    with open(os.path.join(output_dir, 'test_results.txt'), 'w') as f:
-        f.write(f"CGAN Test Results for PSNR={psnr_level}dB\n")
-        f.write(f"======================================\n\n")
-        f.write(f"Dataset type: {args.dataset_type}\n")
-        f.write(f"Number of test samples: {n_samples}\n\n")
-        f.write(f"Average Metrics:\n")
-        f.write(f"  Noisy PSNR: {avg_noisy_psnr:.2f}dB\n")
-        f.write(f"  Denoised PSNR: {avg_denoised_psnr:.2f}dB\n")
-        f.write(f"  PSNR Improvement: {avg_psnr_improvement:.2f}dB\n")
-        f.write(f"  Denoised SSIM: {avg_denoised_ssim:.4f}\n")
-        f.write(f"  Noisy MSE: {avg_noisy_mse:.6f}\n")
-        f.write(f"  Denoised MSE: {avg_denoised_mse:.6f}\n")
-
-        # Write CNN metrics if available
-        if cnn_metrics:
-            f.write(f"\nCNN Recognition Accuracy:\n")
-            f.write(f"  Clean Accuracy: {cnn_metrics['clean_accuracy']:.2f}%\n")
-            f.write(f"  Noisy Accuracy: {cnn_metrics['noisy_accuracy']:.2f}%\n")
-            f.write(f"  Denoised Accuracy: {cnn_metrics['denoised_accuracy']:.2f}%\n")
-            f.write(f"  Accuracy Improvement: {cnn_metrics['accuracy_improvement']:.2f}%\n")
-
-        f.write(f"\nIndividual Sample Results:\n")
-        for res in results:
-            f.write(f"  Sample {res['sample_idx'] + 1}:\n")
-            f.write(f"    Noisy PSNR: {res['noisy_psnr']:.2f}dB\n")
-            f.write(f"    Denoised PSNR: {res['denoised_psnr']:.2f}dB\n")
-            f.write(f"    PSNR Improvement: {res['psnr_improvement']:.2f}dB\n")
-            f.write(f"    Denoised SSIM: {res['denoised_ssim']:.4f}\n")
-            f.write(f"    Noisy MSE: {res['noisy_mse']:.6f}\n")
-            f.write(f"    Denoised MSE: {res['denoised_mse']:.6f}\n\n")
 
     return summary
 
 
-def test_cae(args, device, psnr_level, cnn_model=None):
+def test_cae(args, device, psnr_level, cnn_model=None, collected_samples=None):
     """
     Test CAE model for HRRP signal denoising at a specific PSNR level
 
@@ -387,6 +335,7 @@ def test_cae(args, device, psnr_level, cnn_model=None):
         device: Device to test on (CPU or GPU)
         psnr_level: Target PSNR level in dB
         cnn_model: Pre-trained CNN for recognition accuracy evaluation (optional)
+        collected_samples: Dictionary to collect samples for grid visualization
 
     Returns:
         Dictionary of test metrics
@@ -492,33 +441,19 @@ def test_cae(args, device, psnr_level, cnn_model=None):
                 'psnr_improvement': denoised_psnr - noisy_psnr
             })
 
-            # Plot and save results
-            plt.figure(figsize=(12, 4))
+            # Collect samples for grid visualization (first 5 samples)
+            if collected_samples is not None and i < 5:
+                if i not in collected_samples:
+                    collected_samples[i] = {
+                        'clean': clean_np,
+                        'noisy': noisy_data.cpu().numpy()[0],
+                        'noisy_psnr': noisy_psnr
+                    }
 
-            plt.subplot(1, 3, 1)
-            plt.plot(clean_data.cpu().numpy()[0], color=COLORS['clean'], linewidth=1.5)
-            plt.title('Clean HRRP')
-            plt.xlabel('Range Bin')
-            plt.ylabel('Magnitude')
-            plt.grid(True, linestyle='--', alpha=0.3)
-
-            plt.subplot(1, 3, 2)
-            plt.plot(noisy_data.cpu().numpy()[0], color=COLORS['noisy'], linewidth=1.5)
-            plt.title(f'Noisy HRRP (PSNR: {noisy_psnr:.2f}dB)')
-            plt.xlabel('Range Bin')
-            plt.ylabel('Magnitude')
-            plt.grid(True, linestyle='--', alpha=0.3)
-
-            plt.subplot(1, 3, 3)
-            plt.plot(denoised_data.cpu().numpy()[0], color=COLORS['cae'], linewidth=1.5)
-            plt.title(f'CAE Denoised (PSNR: {denoised_psnr:.2f}dB, SSIM: {denoised_ssim:.4f})')
-            plt.xlabel('Range Bin')
-            plt.ylabel('Magnitude')
-            plt.grid(True, linestyle='--', alpha=0.3)
-
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, f'sample_{i + 1}_denoising.svg'), dpi=300, bbox_inches='tight')
-            plt.close()
+                # Add CAE results
+                collected_samples[i]['cae'] = denoised_np
+                collected_samples[i]['cae_psnr'] = denoised_psnr
+                collected_samples[i]['cae_ssim'] = denoised_ssim
 
             # Update progress bar
             progress_bar.update(1)
@@ -587,53 +522,11 @@ def test_cae(args, device, psnr_level, cnn_model=None):
     print(f"  Average Denoised PSNR: {avg_denoised_psnr:.2f}dB")
     print(f"  Average PSNR Improvement: {avg_psnr_improvement:.2f}dB")
     print(f"  Average Denoised SSIM: {avg_denoised_ssim:.4f}")
-    print(f"  Average Noisy MSE: {avg_noisy_mse:.6f}")
-    print(f"  Average Denoised MSE: {avg_denoised_mse:.6f}")
-
-    # Print CNN metrics if available
-    if cnn_metrics:
-        print(f"  CNN Clean Accuracy: {cnn_metrics['clean_accuracy']:.2f}%")
-        print(f"  CNN Noisy Accuracy: {cnn_metrics['noisy_accuracy']:.2f}%")
-        print(f"  CNN Denoised Accuracy: {cnn_metrics['denoised_accuracy']:.2f}%")
-        print(f"  CNN Accuracy Improvement: {cnn_metrics['accuracy_improvement']:.2f}%")
-
-    # Write summary to file
-    with open(os.path.join(output_dir, 'test_results.txt'), 'w') as f:
-        f.write(f"CAE Test Results for PSNR={psnr_level}dB\n")
-        f.write(f"====================================\n\n")
-        f.write(f"Dataset type: {args.dataset_type}\n")
-        f.write(f"Number of test samples: {n_samples}\n\n")
-        f.write(f"Average Metrics:\n")
-        f.write(f"  Noisy PSNR: {avg_noisy_psnr:.2f}dB\n")
-        f.write(f"  Denoised PSNR: {avg_denoised_psnr:.2f}dB\n")
-        f.write(f"  PSNR Improvement: {avg_psnr_improvement:.2f}dB\n")
-        f.write(f"  Denoised SSIM: {avg_denoised_ssim:.4f}\n")
-        f.write(f"  Noisy MSE: {avg_noisy_mse:.6f}\n")
-        f.write(f"  Denoised MSE: {avg_denoised_mse:.6f}\n")
-
-        # Write CNN metrics if available
-        if cnn_metrics:
-            f.write(f"\nCNN Recognition Accuracy:\n")
-            f.write(f"  Clean Accuracy: {cnn_metrics['clean_accuracy']:.2f}%\n")
-            f.write(f"  Noisy Accuracy: {cnn_metrics['noisy_accuracy']:.2f}%\n")
-            f.write(f"  Denoised Accuracy: {cnn_metrics['denoised_accuracy']:.2f}%\n")
-            f.write(f"  Accuracy Improvement: {cnn_metrics['accuracy_improvement']:.2f}%\n")
-
-        f.write(f"\nIndividual Sample Results:\n")
-        for res in results:
-            f.write(f"  Sample {res['sample_idx'] + 1}:\n")
-            f.write(f"    Noisy PSNR: {res['noisy_psnr']:.2f}dB\n")
-            f.write(f"    Denoised PSNR: {res['denoised_psnr']:.2f}dB\n")
-            f.write(f"    PSNR Improvement: {res['psnr_improvement']:.2f}dB\n")
-            f.write(f"    Denoised SSIM: {res['denoised_ssim']:.4f}\n")
-            f.write(f"    Noisy MSE: {res['noisy_mse']:.6f}\n")
-            f.write(f"    Denoised MSE: {res['denoised_mse']:.6f}\n\n")
 
     return summary
 
 
-# test_msae function to be added to test_all.py
-def test_msae(args, device, psnr_level, cnn_model=None):
+def test_msae(args, device, psnr_level, cnn_model=None, collected_samples=None):
     """
     Test MSAE model for HRRP signal denoising at a specific PSNR level
 
@@ -642,6 +535,7 @@ def test_msae(args, device, psnr_level, cnn_model=None):
         device: Device to test on (CPU or GPU)
         psnr_level: Target PSNR level in dB
         cnn_model: Pre-trained CNN for recognition accuracy evaluation (optional)
+        collected_samples: Dictionary to collect samples for grid visualization
 
     Returns:
         Dictionary of test metrics
@@ -752,33 +646,19 @@ def test_msae(args, device, psnr_level, cnn_model=None):
                 'psnr_improvement': denoised_psnr - noisy_psnr
             })
 
-            # Plot and save results
-            plt.figure(figsize=(12, 4))
+            # Collect samples for grid visualization (first 5 samples)
+            if collected_samples is not None and i < 5:
+                if i not in collected_samples:
+                    collected_samples[i] = {
+                        'clean': clean_np,
+                        'noisy': noisy_data.cpu().numpy()[0],
+                        'noisy_psnr': noisy_psnr
+                    }
 
-            plt.subplot(1, 3, 1)
-            plt.plot(clean_data.cpu().numpy()[0], color=COLORS['clean'], linewidth=1.5)
-            plt.title('Clean HRRP')
-            plt.xlabel('Range Bin')
-            plt.ylabel('Magnitude')
-            plt.grid(True, linestyle='--', alpha=0.3)
-
-            plt.subplot(1, 3, 2)
-            plt.plot(noisy_data.cpu().numpy()[0], color=COLORS['noisy'], linewidth=1.5)
-            plt.title(f'Noisy HRRP (PSNR: {noisy_psnr:.2f}dB)')
-            plt.xlabel('Range Bin')
-            plt.ylabel('Magnitude')
-            plt.grid(True, linestyle='--', alpha=0.3)
-
-            plt.subplot(1, 3, 3)
-            plt.plot(denoised_data.cpu().numpy()[0], color='purple', linewidth=1.5)
-            plt.title(f'MSAE Denoised (PSNR: {denoised_psnr:.2f}dB, SSIM: {denoised_ssim:.4f})')
-            plt.xlabel('Range Bin')
-            plt.ylabel('Magnitude')
-            plt.grid(True, linestyle='--', alpha=0.3)
-
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, f'sample_{i + 1}_denoising.svg'), dpi=300, bbox_inches='tight')
-            plt.close()
+                # Add MSAE results
+                collected_samples[i]['msae'] = denoised_np
+                collected_samples[i]['msae_psnr'] = denoised_psnr
+                collected_samples[i]['msae_ssim'] = denoised_ssim
 
             # Update progress bar
             progress_bar.update(1)
@@ -847,497 +727,269 @@ def test_msae(args, device, psnr_level, cnn_model=None):
     print(f"  Average Denoised PSNR: {avg_denoised_psnr:.2f}dB")
     print(f"  Average PSNR Improvement: {avg_psnr_improvement:.2f}dB")
     print(f"  Average Denoised SSIM: {avg_denoised_ssim:.4f}")
-    print(f"  Average Noisy MSE: {avg_noisy_mse:.6f}")
-    print(f"  Average Denoised MSE: {avg_denoised_mse:.6f}")
-
-    # Print CNN metrics if available
-    if cnn_metrics:
-        print(f"  CNN Clean Accuracy: {cnn_metrics['clean_accuracy']:.2f}%")
-        print(f"  CNN Noisy Accuracy: {cnn_metrics['noisy_accuracy']:.2f}%")
-        print(f"  CNN Denoised Accuracy: {cnn_metrics['denoised_accuracy']:.2f}%")
-        print(f"  CNN Accuracy Improvement: {cnn_metrics['accuracy_improvement']:.2f}%")
-
-    # Write summary to file
-    with open(os.path.join(output_dir, 'test_results.txt'), 'w') as f:
-        f.write(f"MSAE Test Results for PSNR={psnr_level}dB\n")
-        f.write(f"====================================\n\n")
-        f.write(f"Dataset type: {args.dataset_type}\n")
-        f.write(f"Number of test samples: {n_samples}\n\n")
-        f.write(f"Average Metrics:\n")
-        f.write(f"  Noisy PSNR: {avg_noisy_psnr:.2f}dB\n")
-        f.write(f"  Denoised PSNR: {avg_denoised_psnr:.2f}dB\n")
-        f.write(f"  PSNR Improvement: {avg_psnr_improvement:.2f}dB\n")
-        f.write(f"  Denoised SSIM: {avg_denoised_ssim:.4f}\n")
-        f.write(f"  Noisy MSE: {avg_noisy_mse:.6f}\n")
-        f.write(f"  Denoised MSE: {avg_denoised_mse:.6f}\n")
-
-        # Write CNN metrics if available
-        if cnn_metrics:
-            f.write(f"\nCNN Recognition Accuracy:\n")
-            f.write(f"  Clean Accuracy: {cnn_metrics['clean_accuracy']:.2f}%\n")
-            f.write(f"  Noisy Accuracy: {cnn_metrics['noisy_accuracy']:.2f}%\n")
-            f.write(f"  Denoised Accuracy: {cnn_metrics['denoised_accuracy']:.2f}%\n")
-            f.write(f"  Accuracy Improvement: {cnn_metrics['accuracy_improvement']:.2f}%\n")
-
-        f.write(f"\nIndividual Sample Results:\n")
-        for res in results:
-            f.write(f"  Sample {res['sample_idx'] + 1}:\n")
-            f.write(f"    Noisy PSNR: {res['noisy_psnr']:.2f}dB\n")
-            f.write(f"    Denoised PSNR: {res['denoised_psnr']:.2f}dB\n")
-            f.write(f"    PSNR Improvement: {res['psnr_improvement']:.2f}dB\n")
-            f.write(f"    Denoised SSIM: {res['denoised_ssim']:.4f}\n")
-            f.write(f"    Noisy MSE: {res['noisy_mse']:.6f}\n")
-            f.write(f"    Denoised MSE: {res['denoised_mse']:.6f}\n\n")
 
     return summary
 
 
-def compare_methods(args, psnr_level, results):
+def create_sample_grid_plot(args, psnr_level, collected_samples):
     """
-    Compare all denoising methods at a specific PSNR level and create visualizations
+    Create a 5x1 grid plot showing 5 HRRP samples across all methods
 
     Args:
         args: Testing arguments
         psnr_level: PSNR level in dB
-        results: Dictionary of results from all models
+        collected_samples: Dictionary of collected samples data
     """
-    print(f"Generating comparison visualizations for PSNR={psnr_level}dB...")
+    print(f"Creating sample visualization grid for PSNR={psnr_level}dB...")
 
-    # Create output directory for comparisons
+    # Create output directory
     output_dir = os.path.join(args.output_dir, f"comparison_psnr_{psnr_level}dB")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Extract results
-    methods = list(results.keys())
+    # Check if we have samples to visualize
+    if not collected_samples or len(collected_samples) == 0:
+        print("No samples collected for visualization")
+        return
 
-    # Create bar plots comparing metrics
+    # Create figure with 5 rows (samples) and 1 column
+    fig = plt.figure(figsize=(15, 12))
 
-    # 1. PSNR Improvement plot
-    plt.figure(figsize=(10, 6))
+    # For each of the 5 samples
+    for sample_idx in range(min(5, len(collected_samples))):
+        sample = collected_samples[sample_idx]
 
-    psnr_improvements = [results[method]['avg_psnr_improvement'] for method in methods]
-    method_colors = [COLORS[method.lower()] for method in methods]
+        # Create grid for this sample with 1 row and 5 columns (clean, noisy, 3 methods)
+        gs = gridspec.GridSpecFromSubplotSpec(1, 5, subplot_spec=gridspec.GridSpec(5, 1)[sample_idx])
 
-    bars = plt.bar(methods, psnr_improvements, color=method_colors, width=0.6, edgecolor='k', linewidth=1)
+        # Clean signal plot
+        ax1 = fig.add_subplot(gs[0])
+        ax1.plot(sample['clean'], color=COLORS['clean'], linewidth=1.5)
+        if sample_idx == 0:  # Title only for the first row
+            ax1.set_title('Clean HRRP')
+        ax1.set_ylabel(f'Sample {sample_idx + 1}')
+        ax1.grid(True, linestyle='--', alpha=0.3)
 
-    plt.title(f'PSNR Improvement Comparison at {psnr_level}dB Noise Level', pad=15)
-    plt.xlabel('Methods')
-    plt.ylabel('PSNR Improvement (dB)')
-    plt.grid(axis='y', linestyle='--', alpha=0.3)
-    ax = plt.gca()  # Get current axes
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    # Add value labels on bars
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2., height + 0.1,
-                 f'+{height:.2f}dB', ha='center', va='bottom')
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'psnr_improvement_comparison.svg'), dpi=300, bbox_inches='tight')
-    plt.close()
-
-    # 2. SSIM Comparison plot
-    plt.figure(figsize=(10, 6))
-
-    ssim_values = [results[method]['avg_denoised_ssim'] for method in methods]
-
-    bars = plt.bar(methods, ssim_values, color=method_colors, width=0.6, edgecolor='k', linewidth=1)
-
-    plt.title(f'SSIM Comparison at {psnr_level}dB Noise Level', pad=15)
-    plt.xlabel('Methods')
-    plt.ylabel('Structural Similarity Index (SSIM)')
-    plt.grid(axis='y', linestyle='--', alpha=0.3)
-    ax = plt.gca()  # Get current axes
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    # Set y-axis to start from a reasonable value to better show differences
-    ssim_min = min(ssim_values) * 0.95
-    plt.ylim(ssim_min, 1.0)
-
-    # Add value labels on bars
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2., height + 0.005,
-                 f'{height:.4f}', ha='center', va='bottom')
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'ssim_comparison.svg'), dpi=300, bbox_inches='tight')
-    plt.close()
-
-    # 3. MSE Comparison plot
-    plt.figure(figsize=(10, 6))
-
-    mse_values = [results[method]['avg_denoised_mse'] for method in methods]
-
-    bars = plt.bar(methods, mse_values, color=method_colors, width=0.6, edgecolor='k', linewidth=1)
-
-    plt.title(f'MSE Comparison at {psnr_level}dB Noise Level', pad=15)
-    plt.xlabel('Methods')
-    plt.ylabel('Mean Squared Error (MSE)')
-    plt.grid(axis='y', linestyle='--', alpha=0.3)
-    ax = plt.gca()  # Get current axes
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    # Add value labels on bars
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2., height + 0.0005,
-                 f'{height:.6f}', ha='center', va='bottom')
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'mse_comparison.svg'), dpi=300, bbox_inches='tight')
-    plt.close()
-
-    # 4. CNN Recognition Accuracy Comparison plot (if available)
-    if all('denoised_accuracy' in results[method] for method in methods):
-        plt.figure(figsize=(10, 6))
-
-        accuracy_values = [results[method]['denoised_accuracy'] for method in methods]
-
-        bars = plt.bar(methods, accuracy_values, color=method_colors, width=0.6, edgecolor='k', linewidth=1)
-
-        plt.title(f'CNN Recognition Accuracy at {psnr_level}dB Noise Level', pad=15)
-        plt.xlabel('Methods')
-        plt.ylabel('Recognition Accuracy (%)')
-        plt.grid(axis='y', linestyle='--', alpha=0.3)
-        ax = plt.gca()  # Get current axes
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-        # Add value labels on bars
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width() / 2., height + 1.0,
-                     f'{height:.2f}%', ha='center', va='bottom')
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'recognition_accuracy_comparison.svg'), dpi=300, bbox_inches='tight')
-        plt.close()
-
-        # 5. CNN Accuracy Improvement Comparison plot
-        plt.figure(figsize=(10, 6))
-
-        improvement_values = [results[method]['accuracy_improvement'] for method in methods]
-
-        bars = plt.bar(methods, improvement_values, color=method_colors, width=0.6, edgecolor='k', linewidth=1)
-
-        plt.title(f'CNN Accuracy Improvement at {psnr_level}dB Noise Level', pad=15)
-        plt.xlabel('Methods')
-        plt.ylabel('Accuracy Improvement (%)')
-        plt.grid(axis='y', linestyle='--', alpha=0.3)
-        ax = plt.gca()  # Get current axes
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-        # Add value labels on bars
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width() / 2., height + 0.5,
-                     f'+{height:.2f}%', ha='center', va='bottom')
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'recognition_improvement_comparison.svg'), dpi=300, bbox_inches='tight')
-        plt.close()
-
-    # Write comparison report
-    with open(os.path.join(output_dir, 'comparison_results.txt'), 'w') as f:
-        f.write(f"Denoising Methods Comparison at PSNR={psnr_level}dB\n")
-        f.write(f"=================================================\n\n")
-        f.write(f"Dataset type: {args.dataset_type}\n\n")
-
-        # Table header - include CNN metrics if available
-        if all('denoised_accuracy' in results[method] for method in methods):
-            f.write(
-                f"{'Method':<10} {'Denoised PSNR':<15} {'PSNR Gain':<15} {'SSIM':<15} {'MSE':<15} {'CNN Acc':<15} {'CNN Imp':<15}\n")
-            f.write(f"{'-' * 90}\n")
-
-            # Table rows
-            for method in methods:
-                res = results[method]
-                f.write(f"{method:<10} {res['avg_denoised_psnr']:<15.2f} {res['avg_psnr_improvement']:<15.2f} "
-                        f"{res['avg_denoised_ssim']:<15.4f} {res['avg_denoised_mse']:<15.6f} "
-                        f"{res['denoised_accuracy']:<15.2f} {res['accuracy_improvement']:<15.2f}\n")
+        # Noisy signal plot
+        ax2 = fig.add_subplot(gs[1])
+        ax2.plot(sample['noisy'], color=COLORS['noisy'], linewidth=1.5)
+        if sample_idx == 0:
+            ax2.set_title(f'Noisy HRRP\n(PSNR: {sample["noisy_psnr"]:.2f}dB)')
         else:
-            # Original table format without CNN metrics
-            f.write(f"{'Method':<10} {'Denoised PSNR':<15} {'PSNR Gain':<15} {'SSIM':<15} {'MSE':<15}\n")
-            f.write(f"{'-' * 60}\n")
+            ax2.set_title(f'PSNR: {sample["noisy_psnr"]:.2f}dB')
+        ax2.grid(True, linestyle='--', alpha=0.3)
 
-            # Table rows
-            for method in methods:
-                res = results[method]
-                f.write(f"{method:<10} {res['avg_denoised_psnr']:<15.2f} {res['avg_psnr_improvement']:<15.2f} "
-                        f"{res['avg_denoised_ssim']:<15.4f} {res['avg_denoised_mse']:<15.6f}\n")
+        # CGAN results, if available
+        if 'cgan' in sample:
+            ax3 = fig.add_subplot(gs[2])
+            ax3.plot(sample['cgan'], color=COLORS['cgan'], linewidth=1.5)
+            if sample_idx == 0:
+                ax3.set_title(f'CGAN Denoising\n(PSNR: {sample["cgan_psnr"]:.2f}dB)')
+            else:
+                ax3.set_title(f'PSNR: {sample["cgan_psnr"]:.2f}dB')
+            ax3.grid(True, linestyle='--', alpha=0.3)
 
-        f.write(f"\n")
+        # CAE results, if available
+        if 'cae' in sample:
+            ax4 = fig.add_subplot(gs[3])
+            ax4.plot(sample['cae'], color=COLORS['cae'], linewidth=1.5)
+            if sample_idx == 0:
+                ax4.set_title(f'CAE Denoising\n(PSNR: {sample["cae_psnr"]:.2f}dB)')
+            else:
+                ax4.set_title(f'PSNR: {sample["cae_psnr"]:.2f}dB')
+            ax4.grid(True, linestyle='--', alpha=0.3)
 
-        # Find best method for each metric
-        best_psnr = max(methods, key=lambda m: results[m]['avg_denoised_psnr'])
-        best_improve = max(methods, key=lambda m: results[m]['avg_psnr_improvement'])
-        best_ssim = max(methods, key=lambda m: results[m]['avg_denoised_ssim'])
-        best_mse = min(methods, key=lambda m: results[m]['avg_denoised_mse'])
+        # MSAE results, if available
+        if 'msae' in sample:
+            ax5 = fig.add_subplot(gs[4])
+            ax5.plot(sample['msae'], color=COLORS['msae'], linewidth=1.5)
+            if sample_idx == 0:
+                ax5.set_title(f'MSAE Denoising\n(PSNR: {sample["msae_psnr"]:.2f}dB)')
+            else:
+                ax5.set_title(f'PSNR: {sample["msae_psnr"]:.2f}dB')
+            ax5.grid(True, linestyle='--', alpha=0.3)
 
-        f.write(f"Best method by PSNR: {best_psnr} ({results[best_psnr]['avg_denoised_psnr']:.2f}dB)\n")
-        f.write(
-            f"Best method by PSNR improvement: {best_improve} (+{results[best_improve]['avg_psnr_improvement']:.2f}dB)\n")
-        f.write(f"Best method by SSIM: {best_ssim} ({results[best_ssim]['avg_denoised_ssim']:.4f})\n")
-        f.write(f"Best method by MSE: {best_mse} ({results[best_mse]['avg_denoised_mse']:.6f})\n")
+    # Add a common x-label
+    fig.text(0.5, 0.04, 'Range Bin', ha='center', fontsize=12)
 
-        # Add CNN metrics if available
-        if all('denoised_accuracy' in results[method] for method in methods):
-            best_acc = max(methods, key=lambda m: results[m]['denoised_accuracy'])
-            best_acc_imp = max(methods, key=lambda m: results[m]['accuracy_improvement'])
+    # Add a common y-label
+    fig.text(0.04, 0.5, 'Magnitude', va='center', rotation='vertical', fontsize=12)
 
-            f.write(f"Best method by CNN accuracy: {best_acc} ({results[best_acc]['denoised_accuracy']:.2f}%)\n")
-            f.write(
-                f"Best method by CNN accuracy improvement: {best_acc_imp} (+{results[best_acc_imp]['accuracy_improvement']:.2f}%)\n")
+    # Add a super title
+    fig.suptitle(f'HRRP Denoising Comparison at PSNR={psnr_level}dB', fontsize=16, y=0.98)
 
-    print(f"Comparison results saved to {output_dir}")
+    plt.tight_layout(rect=[0.05, 0.05, 0.95, 0.95])
+
+    # Save figure
+    plt.savefig(os.path.join(output_dir, 'sample_grid_comparison.svg'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, 'sample_grid_comparison.png'), dpi=300, bbox_inches='tight')
+    plt.close()
 
 
-def generate_psnr_comparison(args, all_results):
+def create_comparison_grid(args, all_results):
     """
-    Generate comparison charts across different PSNR levels
+    Create a 2x2 grid of bar charts showing metrics across all PSNR levels
+    for each method: Recognition rate, Recognition rate improvement, SSIM, and PSNR improvement
 
     Args:
         args: Testing arguments
         all_results: Dictionary of results from all models and PSNR levels
     """
-    print("Generating PSNR level comparison visualizations...")
+    print("Creating 2x2 comparison grid across all PSNR levels...")
 
     # Create output directory
-    output_dir = os.path.join(args.output_dir, "psnr_comparison")
+    output_dir = os.path.join(args.output_dir, "comparison_grid")
     os.makedirs(output_dir, exist_ok=True)
 
     # Extract PSNR levels and methods
     psnr_levels = sorted(list(all_results.keys()))
-    methods = list(all_results[psnr_levels[0]].keys())
+    methods = sorted(list(all_results[psnr_levels[0]].keys()))
 
-    # 1. PSNR Improvement vs. Noise Level
-    plt.figure(figsize=(12, 6))
+    # Check if CNN metrics are available for all methods and PSNR levels
+    has_cnn_metrics = True
+    for psnr in psnr_levels:
+        for method in methods:
+            if 'denoised_accuracy' not in all_results[psnr][method]:
+                has_cnn_metrics = False
+                break
 
-    width = 0.25
-    x = np.arange(len(psnr_levels))
+    if not has_cnn_metrics:
+        print("Warning: CNN metrics not available for all models. Cannot create comparison grid.")
+        return
+
+    # Create figure with 2x2 grid
+    fig = plt.figure(figsize=(15, 12))
+    gs = gridspec.GridSpec(2, 2, figure=fig)
+
+    # Set bar width and positions
+    num_methods = len(methods)
+    num_psnr = len(psnr_levels)
+    bar_width = 0.8 / num_methods
+
+    # 1. Recognition Rate (top-left)
+    ax1 = fig.add_subplot(gs[0, 0])
 
     for i, method in enumerate(methods):
-        improvements = [all_results[psnr][method]['avg_psnr_improvement'] for psnr in psnr_levels]
-        offset = (i - len(methods) / 2 + 0.5) * width
-        bars = plt.bar(x + offset, improvements, width, label=method, color=COLORS[method.lower()], edgecolor='k',
-                       linewidth=1)
+        x_positions = np.arange(num_psnr)
+        accuracy_values = [all_results[psnr][method]['denoised_accuracy'] for psnr in psnr_levels]
+
+        offset = (i - num_methods / 2 + 0.5) * bar_width
+        bars = ax1.bar(x_positions + offset, accuracy_values, bar_width,
+                       label=method, color=COLORS[method.lower()], edgecolor='k', linewidth=1)
 
         # Add value labels
-        for bar in bars:
+        for j, bar in enumerate(bars):
             height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width() / 2., height + 0.1,
-                     f'+{height:.1f}dB', ha='center', va='bottom', fontsize=9)
+            ax1.text(bar.get_x() + bar.get_width() / 2., height + 1,
+                     f'{height:.1f}%', ha='center', va='bottom', fontsize=8)
 
-    plt.xlabel('Input Noise Level (PSNR)')
-    plt.ylabel('PSNR Improvement (dB)')
-    plt.title('PSNR Improvement vs. Noise Level', pad=15)
-    plt.xticks(x, [f'{level}dB' for level in psnr_levels])
-    plt.legend(frameon=False)
-    plt.grid(axis='y', linestyle='--', alpha=0.3)
-    ax = plt.gca()  # Get current axes
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    ax1.set_title('Recognition Accuracy', fontsize=13)
+    ax1.set_xlabel('Noise Level (PSNR, dB)', fontsize=11)
+    ax1.set_ylabel('Accuracy (%)', fontsize=11)
+    ax1.set_xticks(np.arange(num_psnr))
+    ax1.set_xticklabels([f'{psnr}dB' for psnr in psnr_levels])
+    ax1.grid(axis='y', linestyle='--', alpha=0.3)
+    ax1.spines['top'].set_visible(False)
+    ax1.spines['right'].set_visible(False)
 
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'psnr_improvement_vs_noise.svg'), dpi=300, bbox_inches='tight')
-    plt.close()
-
-    # 2. SSIM vs. Noise Level
-    plt.figure(figsize=(12, 6))
+    # 2. Recognition Rate Improvement (top-right)
+    ax2 = fig.add_subplot(gs[0, 1])
 
     for i, method in enumerate(methods):
+        x_positions = np.arange(num_psnr)
+        improvement_values = [all_results[psnr][method]['accuracy_improvement'] for psnr in psnr_levels]
+
+        offset = (i - num_methods / 2 + 0.5) * bar_width
+        bars = ax2.bar(x_positions + offset, improvement_values, bar_width,
+                       label=method, color=COLORS[method.lower()], edgecolor='k', linewidth=1)
+
+        # Add value labels
+        for j, bar in enumerate(bars):
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width() / 2., height + 0.5,
+                     f'+{height:.1f}%', ha='center', va='bottom', fontsize=8)
+
+    ax2.set_title('Recognition Accuracy Improvement', fontsize=13)
+    ax2.set_xlabel('Noise Level (PSNR, dB)', fontsize=11)
+    ax2.set_ylabel('Improvement (%)', fontsize=11)
+    ax2.set_xticks(np.arange(num_psnr))
+    ax2.set_xticklabels([f'{psnr}dB' for psnr in psnr_levels])
+    ax2.grid(axis='y', linestyle='--', alpha=0.3)
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
+
+    # 3. SSIM (bottom-left)
+    ax3 = fig.add_subplot(gs[1, 0])
+
+    for i, method in enumerate(methods):
+        x_positions = np.arange(num_psnr)
         ssim_values = [all_results[psnr][method]['avg_denoised_ssim'] for psnr in psnr_levels]
-        offset = (i - len(methods) / 2 + 0.5) * width
-        bars = plt.bar(x + offset, ssim_values, width, label=method, color=COLORS[method.lower()], edgecolor='k',
-                       linewidth=1)
+
+        offset = (i - num_methods / 2 + 0.5) * bar_width
+        bars = ax3.bar(x_positions + offset, ssim_values, bar_width,
+                       label=method, color=COLORS[method.lower()], edgecolor='k', linewidth=1)
 
         # Add value labels
-        for bar in bars:
+        for j, bar in enumerate(bars):
             height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width() / 2., height + 0.005,
-                     f'{height:.3f}', ha='center', va='bottom', fontsize=9)
+            ax3.text(bar.get_x() + bar.get_width() / 2., height + 0.005,
+                     f'{height:.3f}', ha='center', va='bottom', fontsize=8)
 
-    plt.xlabel('Input Noise Level (PSNR)')
-    plt.ylabel('Average SSIM')
-    plt.title('SSIM vs. Noise Level', pad=15)
-    plt.xticks(x, [f'{level}dB' for level in psnr_levels])
-    plt.legend(frameon=False)
-    plt.grid(axis='y', linestyle='--', alpha=0.3)
-    ax = plt.gca()  # Get current axes
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    ax3.set_title('Structural Similarity Index (SSIM)', fontsize=13)
+    ax3.set_xlabel('Noise Level (PSNR, dB)', fontsize=11)
+    ax3.set_ylabel('SSIM', fontsize=11)
+    ax3.set_xticks(np.arange(num_psnr))
+    ax3.set_xticklabels([f'{psnr}dB' for psnr in psnr_levels])
+    ax3.grid(axis='y', linestyle='--', alpha=0.3)
+    ax3.spines['top'].set_visible(False)
+    ax3.spines['right'].set_visible(False)
 
     # Set SSIM axis to better show differences
     ssim_min = min([all_results[psnr][method]['avg_denoised_ssim']
                     for psnr in psnr_levels for method in methods]) * 0.95
-    plt.ylim(ssim_min, 1.0)
+    ax3.set_ylim(ssim_min, 1.0)
 
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'ssim_vs_noise.svg'), dpi=300, bbox_inches='tight')
+    # 4. PSNR Improvement (bottom-right)
+    ax4 = fig.add_subplot(gs[1, 1])
+
+    for i, method in enumerate(methods):
+        x_positions = np.arange(num_psnr)
+        psnr_improvements = [all_results[psnr][method]['avg_psnr_improvement'] for psnr in psnr_levels]
+
+        offset = (i - num_methods / 2 + 0.5) * bar_width
+        bars = ax4.bar(x_positions + offset, psnr_improvements, bar_width,
+                       label=method, color=COLORS[method.lower()], edgecolor='k', linewidth=1)
+
+        # Add value labels
+        for j, bar in enumerate(bars):
+            height = bar.get_height()
+            ax4.text(bar.get_x() + bar.get_width() / 2., height + 0.1,
+                     f'+{height:.1f}dB', ha='center', va='bottom', fontsize=8)
+
+    ax4.set_title('PSNR Improvement', fontsize=13)
+    ax4.set_xlabel('Noise Level (PSNR, dB)', fontsize=11)
+    ax4.set_ylabel('Improvement (dB)', fontsize=11)
+    ax4.set_xticks(np.arange(num_psnr))
+    ax4.set_xticklabels([f'{psnr}dB' for psnr in psnr_levels])
+    ax4.grid(axis='y', linestyle='--', alpha=0.3)
+    ax4.spines['top'].set_visible(False)
+    ax4.spines['right'].set_visible(False)
+
+    # Add a common legend at the bottom
+    handles, labels = ax1.get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01),
+               ncol=len(methods), frameon=False, fontsize=11)
+
+    # Add a super title
+    fig.suptitle('Comparative Performance of HRRP Denoising Methods', fontsize=16, y=0.98)
+
+    plt.tight_layout(rect=[0.05, 0.05, 0.95, 0.94])
+
+    # Save figure
+    plt.savefig(os.path.join(output_dir, 'metrics_comparison_grid.svg'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, 'metrics_comparison_grid.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
-    # 3. CNN Accuracy vs. Noise Level (if available)
-    if all('denoised_accuracy' in all_results[psnr][method]
-           for psnr in psnr_levels for method in methods):
-        plt.figure(figsize=(12, 6))
-
-        for i, method in enumerate(methods):
-            acc_values = [all_results[psnr][method]['denoised_accuracy'] for psnr in psnr_levels]
-            offset = (i - len(methods) / 2 + 0.5) * width
-            bars = plt.bar(x + offset, acc_values, width, label=method, color=COLORS[method.lower()], edgecolor='k',
-                           linewidth=1)
-
-            # Add value labels
-            for bar in bars:
-                height = bar.get_height()
-                plt.text(bar.get_x() + bar.get_width() / 2., height + 1.0,
-                         f'{height:.1f}%', ha='center', va='bottom', fontsize=9)
-
-        plt.xlabel('Input Noise Level (PSNR)')
-        plt.ylabel('CNN Recognition Accuracy (%)')
-        plt.title('Recognition Accuracy vs. Noise Level', pad=15)
-        plt.xticks(x, [f'{level}dB' for level in psnr_levels])
-        plt.legend(frameon=False)
-        plt.grid(axis='y', linestyle='--', alpha=0.3)
-        ax = plt.gca()  # Get current axes
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'accuracy_vs_noise.svg'), dpi=300, bbox_inches='tight')
-        plt.close()
-
-        # 4. CNN Accuracy Improvement vs. Noise Level
-        plt.figure(figsize=(12, 6))
-
-        for i, method in enumerate(methods):
-            imp_values = [all_results[psnr][method]['accuracy_improvement'] for psnr in psnr_levels]
-            offset = (i - len(methods) / 2 + 0.5) * width
-            bars = plt.bar(x + offset, imp_values, width, label=method, color=COLORS[method.lower()], edgecolor='k',
-                           linewidth=1)
-
-            # Add value labels
-            for bar in bars:
-                height = bar.get_height()
-                plt.text(bar.get_x() + bar.get_width() / 2., height + 0.5,
-                         f'+{height:.1f}%', ha='center', va='bottom', fontsize=9)
-
-        plt.xlabel('Input Noise Level (PSNR)')
-        plt.ylabel('CNN Accuracy Improvement (%)')
-        plt.title('Accuracy Improvement vs. Noise Level', pad=15)
-        plt.xticks(x, [f'{level}dB' for level in psnr_levels])
-        plt.legend(frameon=False)
-        plt.grid(axis='y', linestyle='--', alpha=0.3)
-        ax = plt.gca()  # Get current axes
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'accuracy_improvement_vs_noise.svg'), dpi=300, bbox_inches='tight')
-        plt.close()
-
-    # Write summary report
-    with open(os.path.join(output_dir, 'summary_results.txt'), 'w') as f:
-        f.write(f"Denoising Methods Comparison Across PSNR Levels\n")
-        f.write(f"==============================================\n\n")
-        f.write(f"Dataset type: {args.dataset_type}\n\n")
-
-        # For each PSNR level
-        for psnr in psnr_levels:
-            f.write(f"PSNR = {psnr}dB Results:\n")
-            f.write(f"{'-' * 40}\n")
-
-            # Check if CNN metrics are available
-            has_cnn_metrics = all('denoised_accuracy' in all_results[psnr][method] for method in methods)
-
-            # Table header
-            if has_cnn_metrics:
-                f.write(f"{'Method':<10} {'Denoised PSNR':<15} {'PSNR Gain':<15} {'SSIM':<15} {'CNN Acc':<15}\n")
-                f.write(f"{'-' * 70}\n")
-
-                # Table rows
-                for method in methods:
-                    res = all_results[psnr][method]
-                    f.write(f"{method:<10} {res['avg_denoised_psnr']:<15.2f} {res['avg_psnr_improvement']:<15.2f} "
-                            f"{res['avg_denoised_ssim']:<15.4f} {res['denoised_accuracy']:<15.2f}\n")
-            else:
-                f.write(f"{'Method':<10} {'Denoised PSNR':<15} {'PSNR Gain':<15} {'SSIM':<15}\n")
-                f.write(f"{'-' * 55}\n")
-
-                # Table rows
-                for method in methods:
-                    res = all_results[psnr][method]
-                    f.write(f"{method:<10} {res['avg_denoised_psnr']:<15.2f} {res['avg_psnr_improvement']:<15.2f} "
-                            f"{res['avg_denoised_ssim']:<15.4f}\n")
-
-            # Find best methods for this PSNR level
-            best_psnr = max(methods, key=lambda m: all_results[psnr][m]['avg_denoised_psnr'])
-            best_improve = max(methods, key=lambda m: all_results[psnr][m]['avg_psnr_improvement'])
-            best_ssim = max(methods, key=lambda m: all_results[psnr][m]['avg_denoised_ssim'])
-
-            f.write(f"\nBest method by PSNR: {best_psnr}\n")
-            f.write(f"Best method by PSNR improvement: {best_improve}\n")
-            f.write(f"Best method by SSIM: {best_ssim}\n")
-
-            # Add CNN best methods if available
-            if has_cnn_metrics:
-                best_acc = max(methods, key=lambda m: all_results[psnr][m]['denoised_accuracy'])
-                best_acc_imp = max(methods, key=lambda m: all_results[psnr][m]['accuracy_improvement'])
-
-                f.write(f"Best method by CNN accuracy: {best_acc}\n")
-                f.write(f"Best method by CNN accuracy improvement: {best_acc_imp}\n")
-
-            f.write(f"\n{'=' * 70}\n\n")
-
-        # Count how many times each method wins
-        f.write("Summary of Best Performing Methods:\n")
-        f.write(f"{'-' * 40}\n\n")
-
-        psnr_winners = {}
-        ssim_winners = {}
-        cnn_winners = {}
-        cnn_imp_winners = {}
-
-        for psnr in psnr_levels:
-            best_psnr = max(methods, key=lambda m: all_results[psnr][m]['avg_psnr_improvement'])
-            best_ssim = max(methods, key=lambda m: all_results[psnr][m]['avg_denoised_ssim'])
-
-            psnr_winners[best_psnr] = psnr_winners.get(best_psnr, 0) + 1
-            ssim_winners[best_ssim] = ssim_winners.get(best_ssim, 0) + 1
-
-            # Count CNN winners if available
-            if all('denoised_accuracy' in all_results[psnr][method] for method in methods):
-                best_acc = max(methods, key=lambda m: all_results[psnr][m]['denoised_accuracy'])
-                best_acc_imp = max(methods, key=lambda m: all_results[psnr][m]['accuracy_improvement'])
-
-                cnn_winners[best_acc] = cnn_winners.get(best_acc, 0) + 1
-                cnn_imp_winners[best_acc_imp] = cnn_imp_winners.get(best_acc_imp, 0) + 1
-
-        f.write("Best method by PSNR improvement:\n")
-        for method, count in psnr_winners.items():
-            f.write(f"  {method}: {count}/{len(psnr_levels)} times\n")
-
-        f.write("\nBest method by SSIM:\n")
-        for method, count in ssim_winners.items():
-            f.write(f"  {method}: {count}/{len(psnr_levels)} times\n")
-
-        # Write CNN winners if available
-        if cnn_winners:
-            f.write("\nBest method by CNN Recognition Accuracy:\n")
-            for method, count in cnn_winners.items():
-                f.write(f"  {method}: {count}/{len(psnr_levels)} times\n")
-
-            f.write("\nBest method by CNN Accuracy Improvement:\n")
-            for method, count in cnn_imp_winners.items():
-                f.write(f"  {method}: {count}/{len(psnr_levels)} times\n")
-
-    print(f"PSNR comparison results saved to {output_dir}")
+    print(f"Metrics comparison grid saved to {output_dir}")
 
 
 def main():
@@ -1348,11 +1000,11 @@ def main():
     parser.add_argument('--model', type=str, default='all',
                         choices=['cgan', 'cae', 'msae', 'all'],
                         help='Model to test')
-    parser.add_argument('--test_dir', type=str, default='datasets/measured_3/test',
+    parser.add_argument('--test_dir', type=str, default='datasets/simulated_3/test',
                         help='Directory containing test data')
-    parser.add_argument('--train_dir', type=str, default='datasets/measured_3/train',
+    parser.add_argument('--train_dir', type=str, default='datasets/simulated_3/train',
                         help='Directory containing training data (for CNN training)')
-    parser.add_argument('--load_dir', type=str, default='checkpoints',
+    parser.add_argument('--load_dir', type=str, default='checkpoints_simulated',
                         help='Directory containing trained models')
     parser.add_argument('--output_dir', type=str, default='results',
                         help='Directory to save test results')
@@ -1364,7 +1016,7 @@ def main():
                         help='PSNR levels to test at (comma-separated values in dB)')
     parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for evaluation')
-    parser.add_argument('--dataset_type', type=str, default='measured',
+    parser.add_argument('--dataset_type', type=str, default='simulated',
                         choices=['simulated', 'measured'],
                         help='Type of dataset to use (simulated or measured)')
 
@@ -1389,17 +1041,13 @@ def main():
                         help='Weight regularization parameter (lambda) for MSAE')
     parser.add_argument('--sparsity_beta', type=float, default=3.0,
                         help='Sparsity weight parameter (beta) for MSAE')
-    parser.add_argument('--svd_interval', type=int, default=10,
-                        help='Interval for SVD weight modification in MSAE')
-    parser.add_argument('--svd_threshold', type=float, default=0.1,
-                        help='Threshold for singular value pruning in MSAE')
 
-    # CNN evaluation parameters
-    parser.add_argument('--use_cnn_eval', default=1,
+    # CNN evaluation parameters - Force enable for metrics visualization
+    parser.add_argument('--use_cnn_eval', action='store_true', default=True,
                         help='Use CNN for recognition accuracy evaluation')
     parser.add_argument('--cnn_dir', type=str, default='checkpoints/cnn_classifier',
                         help='Directory to save/load CNN classifier')
-    parser.add_argument('--retrain_cnn', default=1,
+    parser.add_argument('--retrain_cnn', default=True,
                         help='Force retraining of CNN classifier even if one exists')
     parser.add_argument('--cnn_epochs', type=int, default=20,
                         help='Number of epochs for CNN training')
@@ -1419,12 +1067,10 @@ def main():
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Load or train CNN model for evaluation if requested
-    cnn_model = None
-    if args.use_cnn_eval:
-        print(f"Setting up CNN classifier for evaluation metrics...")
-        cnn_model = load_or_train_cnn(args, device)
-        print("CNN classifier ready for evaluation")
+    # Load or train CNN model for evaluation
+    print(f"Setting up CNN classifier for evaluation metrics...")
+    cnn_model = load_or_train_cnn(args, device)
+    print("CNN classifier ready for evaluation")
 
     # Store all results
     all_results = {}
@@ -1438,31 +1084,34 @@ def main():
         # Results for this PSNR level
         psnr_results = {}
 
+        # Dictionary to collect first 5 samples for grid visualization
+        collected_samples = {}
+
         if args.model in ['cgan', 'all']:
-            cgan_result = test_cgan(args, device, psnr_level, cnn_model)
+            cgan_result = test_cgan(args, device, psnr_level, cnn_model, collected_samples)
             if cgan_result:
                 psnr_results['CGAN'] = cgan_result
 
         if args.model in ['cae', 'all']:
-            cae_result = test_cae(args, device, psnr_level, cnn_model)
+            cae_result = test_cae(args, device, psnr_level, cnn_model, collected_samples)
             if cae_result:
                 psnr_results['CAE'] = cae_result
 
         if args.model in ['msae', 'all']:
-            ae_result = test_msae(args, device, psnr_level, cnn_model)
-            if ae_result:
-                psnr_results['MSAE'] = ae_result
+            msae_result = test_msae(args, device, psnr_level, cnn_model, collected_samples)
+            if msae_result:
+                psnr_results['MSAE'] = msae_result
 
-        # Compare methods if we have results from multiple models
-        if len(psnr_results) > 1:
-            compare_methods(args, psnr_level, psnr_results)
+        # Create sample grid visualization
+        if collected_samples and len(collected_samples) > 0:
+            create_sample_grid_plot(args, psnr_level, collected_samples)
 
         # Store results for this PSNR level
         all_results[psnr_level] = psnr_results
 
-    # Generate comparison across PSNR levels
-    if len(all_results) > 1 and all(len(results) > 0 for results in all_results.values()):
-        generate_psnr_comparison(args, all_results)
+    # Create 2x2 grid comparison visualization across all PSNR levels
+    if all_results and len(all_results) > 0:
+        create_comparison_grid(args, all_results)
 
     print("\nTesting complete for all models and PSNR levels.")
 

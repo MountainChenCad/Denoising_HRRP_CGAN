@@ -10,3 +10,4 @@ ablation_cgan.py
 analyze_ablation_results.py
 /checkpoints_simulated
 /ablation_analysis
+/checkpoints_measured
