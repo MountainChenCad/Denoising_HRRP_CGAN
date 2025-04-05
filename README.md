@@ -1,72 +1,46 @@
-# HRRP Denoising Framework 🔍
+# Feature Fusion CGAN Based HRRP Denosing and Reconstruction :recycle:
+This repository provides a comprehensive deep learning framework for High-Resolution Range Profile (HRRP) signal denoising, supporting multiple models and PSNR-controlled training and testing.
 
-A comprehensive deep learning framework for High-Resolution Range Profile (HRRP) signal denoising, supporting multiple models and PSNR-controlled training and testing.
+> This paper addresses the issue of High Resolution Range Profile (HRRP) data-based Radar Automatic Target Recognition (RATR) under noise interference by proposing a denoising and reconstruction method based on a feature fusion Conditional Generative Adversarial Network (CGAN). Compared with current methods based on Auto-Encoder (AE) models that only achieves local precision, the proposed the CGAN effectively learn the global distribution of HRRP data through the adversarial training of a generator structured as an encoder-decoder and a discriminator composed by a Multilayer Perceptron (MLP). Additionally, to realize precise HRRP denoising and reconstruction, inspired by the application of radial length for rough target classification, we introduce two simple but innovative modules that designed to extract high-dimensional representations of geometry information and identity information, which is finally fused with high-dimensional representation of HRRP extracted by the encoder and serves as the decoder's input. In our experiments, we employs a One Dimensional Convolutional Neural Network (1-D CNN) to classify the denoised and reconstructed HRRPs and evaluate the effectiveness of the proposed method. \textcolor{blue}{Results prove that in the conditions of Peak Signal-to-Noise Ratio (PSNR) 20dB, 10dB and 5dB, the improvement of recognition accuracy, PSNR, and Structural Similarity (SSIM) surpass other methods on both simulated and measured datasets.
 
-## 🌟 Overview
+<p align="center">
+  <img src="method.jpg" width="40%">
+</p>
 
-High-Resolution Range Profiles (HRRPs) are often contaminated with noise during acquisition, which can degrade radar system performance. This project provides a unified framework to train and test different deep learning models for HRRP signal denoising. The framework supports multiple denoising models and allows consistent evaluation across different noise levels (PSNR values).
+---
 
-### 🔧 Supported Models
+## Platform :pushpin:
+Developed and tested on PyCharm IDE with Conda environment. Recommended OS:
+- Ubuntu 20.04+ 
+- Windows 10/11 (WSL2 recommended)
 
-- **CGAN (Conditional GAN)**: A conditional generative adversarial network with feature extractors for target identity and radial length
-- **CAE (Convolutional AutoEncoder)**: A deep autoencoder using 1D convolutional layers
-- **AE (AutoEncoder)**: A traditional fully-connected autoencoder
+---
 
-## 🚀 Features
-
-- **Unified Training Interface**: Train any model with a single command
-- **PSNR-controlled Training**: Train models at specific PSNR noise levels
-- **Unified Testing Framework**: Evaluate all models with consistent metrics
-- **Comprehensive Comparison**: Compare model performance across different noise conditions
-- **Publication-quality Visualization**: Generate high-quality visualization of denoising results
-
-## 📁 Repository Structure
-
-```
-├── ae_models.py          # AE model definition
-├── cae_models.py         # CAE model definition
-├── cgan_models.py        # CGAN generator and discriminator definitions
-├── models.py             # Feature extractor modules definitions
-├── hrrp_dataset.py       # HRRP dataset loading and preprocessing
-├── noise_utils.py        # Noise generation and PSNR utility functions
-├── metrics.py            # Evaluation metrics calculation
-├── visualization.py      # Visualization tools for results
-├── train_all.py          # Unified training interface
-├── test_all.py           # Unified testing and comparison interface
-├── checkpoints/          # Directory for saved models
-│   ├── ae/               # AE model checkpoints
-│   ├── cae/              # CAE model checkpoints
-│   └── cgan/             # CGAN model checkpoints 
-└── results/              # Directory for test results
+## Dependencies :wrench:
+```angular2html
+conda create -n hrrp_denosing python=3.8
+conda activate mlgnn
+pip install torch==2.2.0 torchvision==0.17.0
+pip install numpy, matplotlib, scikit-image, pandas, seaborn
 ```
 
-## 📋 Requirements
+---
 
-- Python 3.8
-- PyTorch 2.2.0
-- CUDA 12.5
-- NumPy
-- Matplotlib
-- Scikit-image
-- Pandas
-- Seaborn
-
-## 🔰 Installation
-
-1. Clone the repository:
-
+## Dataset Structure :file_folder:
+Prepare your data with following structure:
 ```bash
-git clone https://github.com/yourusername/hrrp-denoising.git
-cd hrrp-denoising
+datasets/
+├── simulated_3/
+│   ├── train/
+│   └── train/
+└── measured_3/
+    ├── train/
+    └── test/
 ```
 
-2. Install required packages:
+---
 
-```bash
-pip install torch==2.2.0 numpy matplotlib scikit-image pandas seaborn
-```
-
-## 💡 Usage
+## Quick Start :rocket:
 
 ### Training Models
 
@@ -101,43 +75,13 @@ python test_all.py --model all --psnr_levels 20 10 0 --test_dir datasets/simulat
 python test_all.py --model all --psnr_levels 10 --test_dir datasets/simulated_3/test --cgan_dir checkpoints/cgan --cae_dir checkpoints/cae --ae_dir checkpoints/ae --output_dir results/visualization --num_samples 5 --num_vis_samples 5
 ```
 
-## 📊 Metrics and Evaluation
+## License :page_facing_up:
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-The framework evaluates denoising performance using multiple metrics:
+---
 
-- **PSNR (Peak Signal-to-Noise Ratio)**: Higher is better
-- **SSIM (Structural Similarity Index)**: Higher is better
-- **MSE (Mean Squared Error)**: Lower is better
-
-All metrics are calculated and reported for each model and noise level.
-
-## 🔬 Experimental Results
-
-After training and testing models using this framework, you'll find:
-
-1. **Individual Model Results**: Performance of each model at different PSNR levels
-2. **Comparative Analysis**: Side-by-side comparisons of all models
-3. **Visualization**: High-quality plots showing original, noisy, and denoised signals
-4. **Summary Reports**: Aggregated performance metrics in text and CSV formats
-
-## 📝 Citation
-
-If you use this code for your research, please cite our work:
-
-```
-@article{your_reference,
-  title={Denoising HRRP with Deep Learning Models: A Comparative Study},
-  author={Your Name},
-  journal={Your Journal},
-  year={2025}
-}
-```
-
-## 📜 License
-
-This project is licensed under the MIT License - see the LICENSE.txt file for details.
-
-## Acknowledgments
-
-- This implementation builds upon existing work in conditional GANs and autoencoder architectures
-- The framework design is inspired by best practices in deep learning model comparison and evaluation
+## Contact :email:
+**Lingfeng Chen**  
+:office: National University of Defense Technology  
+:e-mail: [chenlingfeng@nudt.edu.cn](mailto:chenlingfeng@nudt.edu.cn)  
+:globe_with_meridians: [Personal Homepage](http://lingfengchen.cn/)  
