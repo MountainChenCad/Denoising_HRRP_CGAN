@@ -79,9 +79,3 @@ python test_all.py --model all --psnr_levels 10 --test_dir datasets/simulated_3/
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
-
-## Contact :email:
-**Lingfeng Chen**  
-:office: National University of Defense Technology  
-:e-mail: [chenlingfeng@nudt.edu.cn](mailto:chenlingfeng@nudt.edu.cn)  
-:globe_with_meridians: [Personal Homepage](http://lingfengchen.cn/)  
